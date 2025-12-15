@@ -14,58 +14,100 @@ import matplotlib.pyplot as plt
 
 
 def load_data():
-    """Load data from the CSV files referundum/regions/departments."""
-    referendum = pd.DataFrame({})
-    regions = pd.DataFrame({})
-    departments = pd.DataFrame({})
-
+    referendum = pd.read_csv(
+        "data/referendum.csv",
+        sep=";",
+        dtype={"Department code": str},
+    )
+    regions = pd.read_csv("data/regions.csv", dtype={"code": str})
+    departments = pd.read_csv(
+        "data/departments.csv",
+        dtype={"code": str, "region_code": str},
+    )
     return referendum, regions, departments
 
 
 def merge_regions_and_departments(regions, departments):
-    """Merge regions and departments in one DataFrame.
+    merged = departments.merge(
+        regions,
+        left_on="region_code",
+        right_on="code",
+        how="left",
+        suffixes=("_dep", "_reg"),
+    )
 
-    The columns in the final DataFrame should be:
-    ['code_reg', 'name_reg', 'code_dep', 'name_dep']
-    """
+    merged = merged.rename(columns={
+        "code_dep": "code_dep",
+        "name_dep": "name_dep",
+        "code_reg": "code_reg",
+        "name_reg": "name_reg",
+    })
 
-    return pd.DataFrame({})
+    # In case merge created code_dep/name_dep as 'code'/'name'
+    if "code_dep" not in merged.columns:
+        merged = merged.rename(columns={"code": "code_dep", "name": "name_dep"})
+    if "code_reg" not in merged.columns:
+        merged = merged.rename(columns={"code_reg": "code_reg"})
+
+    return merged[["code_reg", "name_reg", "code_dep", "name_dep"]]
 
 
 def merge_referendum_and_areas(referendum, regions_and_departments):
-    """Merge referendum and regions_and_departments in one DataFrame.
+    referendum = referendum.copy()
+    regions_and_departments = regions_and_departments.copy()
 
-    You can drop the lines relative to DOM-TOM-COM departments, and the
-    french living abroad, which all have a code that contains `Z`.
+    # CRITICAL FIX: zero-pad department codes
+    referendum["Department code"] = (
+        referendum["Department code"]
+        .astype(str)
+        .str.zfill(2)
+    )
 
-    DOM-TOM-COM departments are departements that are remote from metropolitan
-    France, like Guadaloupe, Reunion, or Tahiti.
-    """
+    regions_and_departments["code_dep"] = (
+        regions_and_departments["code_dep"]
+        .astype(str)
+        .str.zfill(2)
+    )
 
-    return pd.DataFrame({})
+    merged = referendum.merge(
+        regions_and_departments,
+        left_on="Department code",
+        right_on="code_dep",
+        how="inner",   # keep only valid departments
+    )
+
+    return merged
 
 
 def compute_referendum_result_by_regions(referendum_and_areas):
-    """Return a table with the absolute count for each region.
+    cols = ["Registered", "Abstentions", "Null", "Choice A", "Choice B"]
 
-    The return DataFrame should be indexed by `code_reg` and have columns:
-    ['name_reg', 'Registered', 'Abstentions', 'Null', 'Choice A', 'Choice B']
-    """
+    result = (
+        referendum_and_areas
+        .groupby("name_reg", as_index=False)[cols]
+        .sum()
+    )
 
-    return pd.DataFrame({})
+    return result
 
 
 def plot_referendum_map(referendum_result_by_regions):
-    """Plot a map with the results from the referendum.
+    gdf_regions = gpd.read_file("data/regions.geojson")
 
-    * Load the geographic data with geopandas from `regions.geojson`.
-    * Merge these info into `referendum_result_by_regions`.
-    * Use the method `GeoDataFrame.plot` to display the result map. The results
-      should display the rate of 'Choice A' over all expressed ballots.
-    * Return a gpd.GeoDataFrame with a column 'ratio' containing the results.
-    """
+    gdf = gdf_regions.merge(
+        referendum_result_by_regions,
+        left_on="nom",
+        right_on="name_reg",
+        how="left",
+    )
 
-    return gpd.GeoDataFrame({})
+    gdf["ratio"] = gdf["Choice A"] / (
+        gdf["Choice A"] + gdf["Choice B"]
+    )
+
+    gdf.plot(column="ratio", legend=True)
+
+    return gdf
 
 
 if __name__ == "__main__":
